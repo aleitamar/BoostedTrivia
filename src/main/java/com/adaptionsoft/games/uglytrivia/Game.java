@@ -1,200 +1,199 @@
 package com.adaptionsoft.games.uglytrivia;
 
+import javax.naming.AuthenticationException;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
 public class Game {
-  public static final int MAX_PLAYERS = 6;
-  public static final int NUMBER_OF_BOXES = 12;
-  private static final int LAST_BOX = NUMBER_OF_BOXES - 1;
-  private SystemSettingsDAO settings;
-  private final GameStateDAO game;
-  private List names = new ArrayList();
-  private List<Player> players = new ArrayList<>();
-  private int[] coins = new int[MAX_PLAYERS];
-  private boolean[] inPenalty = new boolean[MAX_PLAYERS];
-  private int currentPlayer = 0;
-  private boolean shouldGetOutOfPenalty;
-  private Authenticator authenticator;
-  private LinkedList pop = new LinkedList();
-  private LinkedList science = new LinkedList();
-  private LinkedList sports = new LinkedList();
-  private LinkedList rock = new LinkedList();
+	public static final int NUMBER_OF_BOXES = 6;
+	private SystemSettingsDAO systemSettingsDAO;
+	private final GameStateDAO gameStateDAO;
+	List players = new ArrayList();
+    int[] places = new int[6];
+    int[] purses  = new int[6];
+    boolean[] inPenaltyBox  = new boolean[6];
+    
+    LinkedList popQuestions = new LinkedList();
+    LinkedList scienceQuestions = new LinkedList();
+    LinkedList sportsQuestions = new LinkedList();
+    LinkedList rockQuestions = new LinkedList();
+    
+    int currentPlayer = 0;
+    boolean isGettingOutOfPenaltyBox;
+	private Authenticator playersAutenticator;
+	public String actualMessage = "";
 
-  public Game(Authenticator authenticator, SystemSettingsDAO settings, GameStateDAO gameState) {
-    this.authenticator = authenticator;
-    this.game = gameState;
-    this.settings = settings;
-    createQuestions();
-  }
-
-  private void createQuestions() {
-    int totalQuestions = this.settings.getNumberOfQuestions();
-    for (int i = 0; i < totalQuestions; i++) {
-      pop.addLast("Pop Question " + i);
-      science.addLast("Science Question " + i);
-      sports.addLast("Sports Question " + i);
-      rock.addLast("Rock Question " + i);
-    }
-  }
-
-  public void addPlayer(String name) {
-    if (!authenticator.authenticate(name)) {
-      throw new MyAuthenticationException();
-    }
-    initPlayer(name);
-  }
-
-  private void initPlayer(String name) {
-    names.add(name);
-    players.add(new Player(0));
-    int playerIndex = names.size();
-    coins[playerIndex] = 0;
-    inPenalty[playerIndex] = false;
-    print(name + " was added");
-    print("They are player number " + playerIndex);
-  }
-
-  void print(String message) {
-    System.out.println(message);
-  }
-
-  public void roll(int roll) {
-    print(names.get(currentPlayer) + " is the current player");
-    print("They have rolled a " + roll);
-    if (inPenalty[currentPlayer]) {
-      tryToGetOutOfPenalty(roll);
-    } else {
-      movePlayer(roll);
-    }
-    game.save(names, players, coins, inPenalty);
-  }
-
-  private void tryToGetOutOfPenalty(int roll) {
-    if (isEven(roll)) {
-      getOutOfPenalty(roll);
-    } else {
-      stayInPenalty();
-    }
-  }
-
-  private void stayInPenalty() {
-    print(names.get(currentPlayer) + " is not getting out of the penalty box");
-    shouldGetOutOfPenalty = false;
-  }
-
-  private void movePlayer(int amount) {
-    setPlace(getPlace() + amount);
-    if (getPlace() > LAST_BOX) setPlace(getPlace() - NUMBER_OF_BOXES);
-    print(names.get(currentPlayer)+ "'s new location is " + getPlace());
-    print("The category is " + currentCategory());
-    askQuestion();
-  }
-
-  private int getPlace() {
-    return currentPlayer().getPlace();
-  }
-
-  private void setPlace(int newPlace) {
-    currentPlayer().setPlace(newPlace);
-  }
-
-  private Player currentPlayer() {
-    return players.get(currentPlayer);
-  }
-
-  private void getOutOfPenalty(int roll) {
-    shouldGetOutOfPenalty = true;
-    print(names.get(currentPlayer) + " is getting out of the penalty box");
-    movePlayer(roll);
-  }
-
-  private boolean isEven(int roll) {
-    return roll % 2 != 0;
-  }
-
-  private void askQuestion() {
-    if (currentCategory() == "Pop")
-      System.out.println(pop.removeFirst());
-    if (currentCategory() == "Science")
-      System.out.println(science.removeFirst());
-    if (currentCategory() == "Sports")
-      System.out.println(sports.removeFirst());
-    if (currentCategory() == "Rock")
-      System.out.println(rock.removeFirst());
-  }
-
-  private String currentCategory() {
-    if (getPlace() == 0) return "Pop";
-    if (getPlace() == 4) return "Pop";
-    if (getPlace() == 8) return "Pop";
-    if (getPlace() == 1) return "Science";
-    if (getPlace() == 5) return "Science";
-    if (getPlace() == 9) return "Science";
-    if (getPlace() == 2) return "Sports";
-    if (getPlace() == 6) return "Sports";
-    if (getPlace() == 10) return "Sports";
-    return "Rock";
-  }
-
-  public boolean wasCorrectlyAnswered() {
-    if (inPenalty[currentPlayer] && !shouldGetOutOfPenalty) {
-        nextPlayer();
-        return true;
-      } else {
-        return processCorrectAnswer();
-      }
+	public Game(Authenticator playersAutenticator, GameStateDAO gameState, SystemSettingsDAO systemSettings){
+		this.playersAutenticator = playersAutenticator;
+		this.gameStateDAO = gameState;
+		this.systemSettingsDAO = systemSettings;
+		int numberOfQuestions = systemSettingsDAO.getNumberOfQuestions();
+		for (int i = 0; i < numberOfQuestions; i++) {
+			popQuestions.addLast("Pop Question " + i);
+			scienceQuestions.addLast(("Science Question " + i));
+			sportsQuestions.addLast(("Sports Question " + i));
+			rockQuestions.addLast(createRockQuestion(i));
+    	}
     }
 
-  private boolean processCorrectAnswer() {
-    print("Answer was correct!!!!");
-    addCoin();
-    return checkForWin();
-  }
+	public String createRockQuestion(int index){
+		return "Rock Question " + index;
+	}
+	
+	public boolean isPlayable() {
+		return (howManyPlayers() >= 2);
+	}
 
-  private void addCoin() {
-    coins[currentPlayer]++;
-    print(names.get(currentPlayer)
-        + " now has "
-        + coins[currentPlayer]
-        + " Gold Coins.");
-  }
+	public boolean add(String playerName) {
+		if (!playersAutenticator.authenticate(playerName)) {
+			throw new MyAuthenticationException( );
+		}
+		
+	    players.add(playerName);
+	    places[howManyPlayers()] = 0;
+	    purses[howManyPlayers()] = 0;
+	    inPenaltyBox[howManyPlayers()] = false;
+	    
+	    print(playerName + " was added");
+	    print("They are player number " + players.size());
+		return true;
+	}
+	
+	public int howManyPlayers() {
+		return players.size();
+	}
 
-  private boolean checkForWin() {
-    boolean winner = didPlayerWin();
-    nextPlayer(); //TODO: move to end of method? bug?
-    if (winner) {
-      checkIfChampion();
-    }
-    return winner;
-  }
+	public void roll(int roll) {
+		print(players.get(currentPlayer) + " is the current player");
+		print("They have rolled a " + roll);
+		
+		if (inPenaltyBox[currentPlayer]) {
+			if (roll % 2 != 0) {
+				isGettingOutOfPenaltyBox = true;
+				
+				print(players.get(currentPlayer) + " is getting out of the penalty box");
+				places[currentPlayer] = places[currentPlayer] + roll;
+				if (places[currentPlayer] > 11) places[currentPlayer] = places[currentPlayer] - 12;
+				
+				print(players.get(currentPlayer) 
+						+ "'s new location is " 
+						+ places[currentPlayer]);
+				print("The category is " + currentCategory());
+				askQuestion();
+			} else {
+				print(players.get(currentPlayer) + " is not getting out of the penalty box");
+				isGettingOutOfPenaltyBox = false;
+				}
+			
+		} else {
+		
+			places[currentPlayer] = places[currentPlayer] + roll;
+			if (places[currentPlayer] > 11) places[currentPlayer] = places[currentPlayer] - 12;
+			
+			print(players.get(currentPlayer) 
+					+ "'s new location is " 
+					+ places[currentPlayer]);
+			print("The category is " + currentCategory());
+			askQuestion();
+		}
+		gameStateDAO.save(players, places, purses, inPenaltyBox);
+	}
 
-  private void checkIfChampion() {
-    GameWinnersList.getInstance().add((String) names.get(currentPlayer));
-    if (GameWinnersList.getInstance().getWinnings((String) names.get(currentPlayer)) > 3) {
-      print(names.get(currentPlayer) + " is a champ!!!!");
-    }
-  }
+	private void askQuestion() {
+		if (currentCategory() == "Pop")
+			print(popQuestions.removeFirst());
+		if (currentCategory() == "Science")
+			print(scienceQuestions.removeFirst());
+		if (currentCategory() == "Sports")
+			print(sportsQuestions.removeFirst());
+		if (currentCategory() == "Rock")
+			print(rockQuestions.removeFirst());		
+	}
+	
+	
+	private String currentCategory() {
+		if (places[currentPlayer] == 0) return "Pop";
+		if (places[currentPlayer] == 4) return "Pop";
+		if (places[currentPlayer] == 8) return "Pop";
+		if (places[currentPlayer] == 1) return "Science";
+		if (places[currentPlayer] == 5) return "Science";
+		if (places[currentPlayer] == 9) return "Science";
+		if (places[currentPlayer] == 2) return "Sports";
+		if (places[currentPlayer] == 6) return "Sports";
+		if (places[currentPlayer] == 10) return "Sports";
+		return "Rock";
+	}
 
-  public boolean wrongAnswer() {
-    print("Question was incorrectly answered");
-    sendToPenalty();
-    nextPlayer();
-    return true;
-  }
+	public boolean wasCorrectlyAnswered() {
+		if (inPenaltyBox[currentPlayer]){
+			if (isGettingOutOfPenaltyBox) {
+				print("Answer was correct!!!!");
+				purses[currentPlayer]++;
+				print(players.get(currentPlayer) 
+						+ " now has "
+						+ purses[currentPlayer]
+						+ " Gold Coins.");
+				
+				boolean winner = didPlayerWin();
+				currentPlayer++;
+				if (currentPlayer == players.size()) currentPlayer = 0;
 
-  private void sendToPenalty() {
-    print(names.get(currentPlayer) + " was sent to the penalty box");
-    inPenalty[currentPlayer] = true;
-  }
+				if (winner) {
+					GameWinnersList.getInstance().add((String) players.get(currentPlayer));
+					if (GameWinnersList.getInstance().getWinnings((String) players.get(currentPlayer)) > 3) {
+						print(players.get(currentPlayer) + " is a champ!!!!");
+					}
+				}
+				return winner;
+			} else {
+				currentPlayer++;
+				if (currentPlayer == players.size()) currentPlayer = 0;
+				return true;
+			}
+			
+			
+			
+		} else {
+		
+			print("Answer was correct!!!!");
+			purses[currentPlayer]++;
+			print(players.get(currentPlayer) 
+					+ " now has "
+					+ purses[currentPlayer]
+					+ " Gold Coins.");
+			
+			boolean winner = didPlayerWin();
+			currentPlayer++;
+			if (currentPlayer == players.size()) currentPlayer = 0;
 
-  private void nextPlayer() {
-    currentPlayer++;
-    if (currentPlayer == names.size()) currentPlayer = 0;
-  }
+			if (winner) {
+				GameWinnersList.getInstance().add((String) players.get(currentPlayer));
+				if (GameWinnersList.getInstance().getWinnings((String) players.get(currentPlayer)) > 3) {
+					print(players.get(currentPlayer) + " is a champ!!!!");
+				}
+			}
+			return winner;
+		}
+	}
+	
+	public boolean wrongAnswer(){
+		print("Question was incorrectly answered");
+		print(players.get(currentPlayer)+ " was sent to the penalty box");
+		inPenaltyBox[currentPlayer] = true;
+		
+		currentPlayer++;
+		if (currentPlayer == players.size()) currentPlayer = 0;
+		return true;
+	}
 
-  private boolean didPlayerWin() {
-    return !(coins[currentPlayer] == MAX_PLAYERS);
-  }
+
+	private void print(Object object) {
+		System.out.println(object);
+		actualMessage += object.toString() + "\n";
+	}
+
+	private boolean didPlayerWin() {
+		return !(purses[currentPlayer] == 6);
+	}
 }
